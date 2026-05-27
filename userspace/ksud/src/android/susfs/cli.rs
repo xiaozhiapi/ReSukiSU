@@ -262,12 +262,12 @@ pub fn run_main(command: SuSFSSubCommands) -> Result<()> {
             config::operation::add_sus_kstat_update(&path);
         }
         SuSFSSubCommands::UpdateSusKstatFullClone { path } => {
-            config::operation::add_sus_kstat_full_clone(&path);
             api::update_sus_kstat_full_clone(&path)?;
+            config::operation::add_sus_kstat_full_clone(&path);
         }
         SuSFSSubCommands::SetUname { release, version } => {
-            config::operation::set_uname(&release, &version);
             api::set_uname(&release, &version)?;
+            config::operation::set_uname(&release, &version);
         }
         SuSFSSubCommands::HideSusMntsForNonSuProcs { enabled } => {
             api::hide_sus_mnts_for_non_su_procs(enabled)?;
