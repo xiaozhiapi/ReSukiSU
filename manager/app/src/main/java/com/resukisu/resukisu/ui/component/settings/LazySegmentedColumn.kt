@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
-inline fun <T> LazyListScope.lazySegmentColumn(
+inline fun <T> LazyListScope.lazySegmentedColumn(
     items: List<T>,
     noHorizontalPadding: Boolean = false,
     noinline key: ((index: Int, item: T) -> Any)? = null,

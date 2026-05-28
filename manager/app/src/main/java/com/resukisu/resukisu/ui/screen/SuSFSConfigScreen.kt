@@ -103,7 +103,7 @@ import com.resukisu.resukisu.ui.component.settings.SegmentedColumn
 import com.resukisu.resukisu.ui.component.settings.SettingsBaseWidget
 import com.resukisu.resukisu.ui.component.settings.SettingsSwitchWidget
 import com.resukisu.resukisu.ui.component.settings.SettingsTextFieldWidget
-import com.resukisu.resukisu.ui.component.settings.lazySegmentColumn
+import com.resukisu.resukisu.ui.component.settings.lazySegmentedColumn
 import com.resukisu.resukisu.ui.navigation.LocalNavigator
 import com.resukisu.resukisu.ui.theme.CardConfig
 import com.resukisu.resukisu.ui.theme.ThemeConfig
@@ -1577,7 +1577,7 @@ private fun AddAppPathDialog(
                             ) {}
                         }
                     } else {
-                        lazySegmentColumn(
+                        lazySegmentedColumn(
                             filtered,
                             key = { _, item -> item.packageName },
                             noHorizontalPadding = true
@@ -1687,7 +1687,7 @@ private fun SlotInfoDialog(
                             )
                         }
                     } else {
-                        lazySegmentColumn(
+                        lazySegmentedColumn(
                             slotInfoList,
                             key = { _, item -> item.slotName }) { _, info ->
                             Column(
