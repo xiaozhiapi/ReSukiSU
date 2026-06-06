@@ -232,7 +232,10 @@ fn apply_sus_kstat_additions(config: &Data) -> bool {
         ) {
             Ok(()) => {}
             Err(e) if is_already_applied_error(&e) => {
-                info!("sus_kstat_statically '{}' is already applied", statically.path);
+                info!(
+                    "sus_kstat_statically '{}' is already applied",
+                    statically.path
+                );
             }
             Err(e) => {
                 warn!(
@@ -316,7 +319,9 @@ fn has_ce_sensitive_config_entries(config: &Data) -> bool {
 }
 
 fn is_configured_ce_path_available(config: &Data) -> bool {
-    any_config_path(config, |path| is_user_ce_path(path) && Path::new(path).exists())
+    any_config_path(config, |path| {
+        is_user_ce_path(path) && Path::new(path).exists()
+    })
 }
 
 fn are_configured_paths_available(config: &Data) -> bool {
@@ -382,13 +387,13 @@ where
         .chain(config.kstat.update_kstat.iter())
         .chain(config.kstat.full_clone.iter())
         .filter_map(|path| non_empty_path(path))
-        .all(|path| predicate(path))
+        .all(&mut predicate)
         && config
             .kstat
             .statically
             .iter()
             .filter_map(|entry| non_empty_path(&entry.path))
-            .all(|path| predicate(path))
+            .all(predicate)
 }
 
 fn non_empty_path(path: &str) -> Option<&str> {
