@@ -1,23 +1,55 @@
-use std::{fs, thread, time::Duration};
+use std::fs;
 
+use anyhow::Result;
+use inotify::{Inotify, WatchMask};
 use log::{info, warn};
 
 use crate::android::susfs::api;
 use crate::android::susfs::config;
 use crate::android::susfs::config::data::Data;
 
-pub fn on_boot_completed() {
+fn is_sdcard_mounted() -> bool {
+    let file = match fs::read_to_string("/proc/mounts") {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    for line in file.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() > 1 {
+            let mount_point = parts[1];
+            if mount_point == "/sdcard" || mount_point.contains("/storage/emulated") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn on_boot_completed() -> Result<()> {
     let config = config::read_config();
 
     let _ = crate::android::utils::create_daemon(true);
 
-    while !fs::exists("/sdcard/Android").is_ok() {
-        thread::sleep(Duration::from_secs(3));
+    let mut inotify = Inotify::init()?;
+
+    inotify
+        .watches()
+        .add("/proc/self/mounts", WatchMask::MODIFY)?;
+
+    let mut buffer = [0; 1024];
+    loop {
+        let mut events = inotify.read_events_blocking(&mut buffer)?;
+        if events.next().is_some() && is_sdcard_mounted() {
+            break;
+        }
     }
 
     if !apply_config(&config) {
         warn!("failed to set susfs config on boot-completed with wait");
     }
+
+    Ok(())
 }
 
 pub fn on_services() {
