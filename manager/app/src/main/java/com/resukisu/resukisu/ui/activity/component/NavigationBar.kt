@@ -43,7 +43,7 @@ import com.resukisu.resukisu.ui.util.LocalHandlePageChange
 import com.resukisu.resukisu.ui.util.LocalSelectedPage
 import com.resukisu.resukisu.ui.util.getModuleCount
 import com.resukisu.resukisu.ui.util.getSuperuserCount
-import com.resukisu.resukisu.ui.viewmodel.SettingsViewModel
+import com.resukisu.resukisu.ui.viewmodel.HomeViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -56,9 +56,9 @@ fun NavigationBar(
     isBottomBar: Boolean
 ) {
     // 是否隐藏 badge
-    val settingsViewModel = viewModel<SettingsViewModel>(viewModelStoreOwner = ksuApp)
-    val settings by settingsViewModel.uiState.collectAsStateWithLifecycle()
-    val isHideOtherInfo = settings.isHideOtherInfo
+    val homeViewModel = viewModel<HomeViewModel>(viewModelStoreOwner = ksuApp)
+    val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
+    val isHideOtherInfo = uiState.isHideOtherInfo
 
     // 翻页处理
     val page = LocalSelectedPage.current

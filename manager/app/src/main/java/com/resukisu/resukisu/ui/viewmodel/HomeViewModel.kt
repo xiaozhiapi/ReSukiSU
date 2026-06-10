@@ -46,7 +46,6 @@ data class HomeUiState(
     val isHideZygiskImplement: Boolean = false,
     val isHideMetaModuleImplement: Boolean = false,
     val isHideLinkCard: Boolean = false,
-    val showKpmInfo: Boolean = false,
     val isInitialDataLoaded: Boolean = false,
     val isCoreDataLoaded: Boolean = false,
     val isExtendedDataLoaded: Boolean = false,
@@ -203,6 +202,85 @@ class HomeViewModel : ViewModel() {
         return job
     }
 
+    private fun updateBooleanPref(
+        context: Context,
+        key: String,
+        value: Boolean,
+        reducer: (HomeUiState) -> HomeUiState,
+    ) {
+        context.appPreferences.putBoolean(key, value)
+        _uiState.update(reducer)
+    }
+
+    fun handleHideSusfsStatusChange(newValue: Boolean) {
+        handleHideSusfsStatusChange(ksuApp, newValue)
+    }
+
+    fun handleHideZygiskImplementChange(newValue: Boolean) {
+        handleHideZygiskImplementChange(ksuApp, newValue)
+    }
+
+    fun handleHideMetaModuleImplementChange(newValue: Boolean) {
+        handleHideMetaModuleImplementChange(ksuApp, newValue)
+    }
+
+    fun handleHideLinkCardChange(newValue: Boolean) {
+        handleHideLinkCardChange(ksuApp, newValue)
+    }
+
+    fun handleHideLinkCardChange(context: Context, newValue: Boolean) {
+        updateBooleanPref(
+            context,
+            "is_hide_link_card",
+            newValue
+        ) { it.copy(isHideLinkCard = newValue) }
+    }
+
+    fun handleHideMetaModuleImplementChange(context: Context, newValue: Boolean) {
+        updateBooleanPref(context, "is_hide_meta_module_Implement", newValue) {
+            it.copy(isHideMetaModuleImplement = newValue)
+        }
+    }
+
+    fun handleHideZygiskImplementChange(context: Context, newValue: Boolean) {
+        updateBooleanPref(context, "is_hide_zygisk_Implement", newValue) {
+            it.copy(isHideZygiskImplement = newValue)
+        }
+    }
+
+    fun handleHideSusfsStatusChange(context: Context, newValue: Boolean) {
+        updateBooleanPref(
+            context,
+            "is_hide_susfs_status",
+            newValue
+        ) { it.copy(isHideSusfsStatus = newValue) }
+    }
+
+    fun handleSimpleModeChange(context: Context, newValue: Boolean) {
+        updateBooleanPref(context, "is_simple_mode", newValue) { it.copy(isSimpleMode = newValue) }
+    }
+
+    fun handleHideVersionChange(newValue: Boolean) {
+        handleHideVersionChange(ksuApp, newValue)
+    }
+
+    fun handleHideVersionChange(context: Context, newValue: Boolean) {
+        updateBooleanPref(
+            context,
+            "is_hide_version",
+            newValue
+        ) { it.copy(isHideVersion = newValue) }
+    }
+
+    fun handleHideOtherInfoChange(newValue: Boolean) {
+        handleHideOtherInfoChange(ksuApp, newValue)
+    }
+
+    fun handleHideOtherInfoChange(context: Context, newValue: Boolean) {
+        updateBooleanPref(context, "is_hide_other_info", newValue) {
+            it.copy(isHideOtherInfo = newValue)
+        }
+    }
     fun refreshData(
         context: Context,
         refreshUI: Boolean = false
