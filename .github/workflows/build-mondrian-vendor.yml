@@ -116,6 +116,24 @@ jobs:
           done
           echo "All stubs done"
 
+      - name: Fill missing vendor-hook headers from AOSP android12-5.10
+        run: |
+          # 小米开源包常漏 include/trace/hooks/*.h，从 AOSP 官方同版本补齐
+          git clone --depth=1 -b android12-5.10 \
+            https://android.googlesource.com/kernel/common aosp_common 2>&1 | tail -2
+          mkdir -p kernel_source/include/trace/hooks
+          copied=0
+          for f in aosp_common/include/trace/hooks/*.h; do
+            base=$(basename "$f")
+            if [ ! -f "kernel_source/include/trace/hooks/$base" ]; then
+              cp "$f" "kernel_source/include/trace/hooks/$base"
+              echo "  + $base"
+              copied=$((copied+1))
+            fi
+          done
+          echo "补齐 $copied 个缺失的 hook 头文件"
+          rm -rf aosp_common
+
       - name: Patch Xiaomi source bugs
         run: |
           cd kernel_source
