@@ -1,0 +1,191 @@
+name: Build Mondrian Vendor GKI + ReSukiSU KPM
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Mondrian Vendor GKI + ReSukiSU KPM
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Maximize disk space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 4096
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            git python3 bc flex bison \
+            libssl-dev libelf-dev zip curl \
+            binutils build-essential make file pahole \
+            libncurses-dev gawk openssl \
+            clang-14 llvm-14 lld-14 \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          for t in clang llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-readelf; do
+            sudo update-alternatives --install /usr/bin/$t $t /usr/bin/${t}-14 100 2>/dev/null || true
+          done
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-14 100 2>/dev/null || true
+          clang --version
+          df -h
+
+      - name: Clone Xiaomi mondrian kernel (mondrian-s-oss)
+        run: |
+          git clone --depth=1 -b mondrian-s-oss \
+            https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git \
+            kernel_source
+          echo "=== Kernel base version ==="
+          head -5 kernel_source/Makefile
+          df -h
+
+      - name: Checkout ReSukiSU v4.1.0
+        uses: actions/checkout@v4
+        with:
+          repository: ReSukiSU/ReSukiSU
+          ref: v4.1.0
+          path: ReSukiSU
+          fetch-depth: 0
+
+      - name: Patch Kbuild KSU_VERSION fallback
+        run: |
+          git config --global --add safe.directory '*'
+          python3 << 'PYEOF'
+          import sys
+          kbuild_path = 'ReSukiSU/kernel/Kbuild'
+          with open(kbuild_path) as f:
+              content = f.read()
+          target = 'ccflags-y += -DKSU_VERSION=$(KSU_VERSION)'
+          if 'KSU_VERSION_FALLBACK_INSERTED' not in content and target in content:
+              fallback = '\n'.join([
+                  '# KSU_VERSION_FALLBACK_INSERTED',
+                  'ifeq ($(KSU_VERSION),)',
+                  'KSU_VERSION := 40000',
+                  '$(warning -- KSU_VERSION was empty; fallback 40000)',
+                  'endif',
+                  '',
+              ]) + '\n'
+              content = content.replace(target, fallback + target)
+              with open(kbuild_path, 'w') as f:
+                  f.write(content)
+              print('Kbuild patched OK')
+          else:
+              print('Already patched or target not found, skipping')
+          PYEOF
+
+      - name: Integrate ReSukiSU into mondrian kernel
+        run: |
+          cp -r ReSukiSU/kernel kernel_source/drivers/kernelsu
+          grep -q 'kernelsu' kernel_source/drivers/Makefile || \
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> kernel_source/drivers/Makefile
+          grep -q 'kernelsu/Kconfig' kernel_source/drivers/Kconfig || \
+            sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' kernel_source/drivers/Kconfig
+          echo "Integration check: $(grep kernelsu kernel_source/drivers/Makefile)"
+
+      - name: Configure kernel (gki_defconfig + mondrian_GKI + KSU/KPM)
+        run: |
+          cd kernel_source
+          mkdir -p out
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang O=out gki_defconfig
+          cat arch/arm64/configs/vendor/mondrian_GKI.config >> out/.config
+          python3 << 'PYEOF'
+          extra = [
+              'CONFIG_KSU=y',
+              'CONFIG_KSU_MANUAL_SU=y',
+              'CONFIG_KPM=y',
+              'CONFIG_KALLSYMS=y',
+              'CONFIG_KALLSYMS_ALL=y',
+              'CONFIG_KSU_MULTI_MANAGER_SUPPORT=y',
+              'CONFIG_KPROBES=y',
+              'CONFIG_KPROBE_EVENTS=y',
+              '# CONFIG_LTO_CLANG_THIN is not set',
+              '# CONFIG_LTO_CLANG_FULL is not set',
+              'CONFIG_LTO_NONE=y',
+          ]
+          with open('out/.config', 'a') as f:
+              f.write('\n'.join(extra) + '\n')
+          print('KSU/KPM configs appended')
+          PYEOF
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang O=out olddefconfig
+          echo "=== Key configs ==="
+          grep -E 'CONFIG_KSU|CONFIG_KPM|CONFIG_KALLSYMS_ALL|CONFIG_LTO' out/.config
+
+      - name: Build kernel Image (LTO=none keeps kprobe symbols stable)
+        run: |
+          cd kernel_source
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            O=out -j$(nproc) \
+            Image 2>&1 | tee $GITHUB_WORKSPACE/build.log
+          echo "=== Build complete ==="
+          ls -lh out/arch/arm64/boot/Image
+          file out/arch/arm64/boot/Image
+
+      - name: Verify KSU symbols in Image
+        run: |
+          if strings kernel_source/out/arch/arm64/boot/Image | grep -qiE 'kernelsu|ksu_handle|SukiSU'; then
+            echo "KSU symbols found in Image - OK"
+          else
+            echo "WARNING: KSU symbols not detected"
+          fi
+
+      - name: Package AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          cp kernel_source/out/arch/arm64/boot/Image AnyKernel3/
+          python3 << 'PYEOF'
+          content = '''# AnyKernel3 - mondrian ReSukiSU Vendor GKI
+          properties() { '
+          kernel.string=ReSukiSU v4.1.0 KPM Mondrian Vendor GKI
+          do.devicecheck=0
+          do.modules=0
+          do.cleanup=1
+          do.cleanuponabort=0
+          '; }
+          block=/dev/block/bootdevice/by-name/boot;
+          is_slot_device=1;
+          ramdisk_compression=auto;
+          patch_vbmeta_flag=auto;
+          . tools/ak3-core.sh;
+          split_boot;
+          flash_boot;
+          '''
+          # Remove leading whitespace from each line
+          lines = [l.lstrip() for l in content.split('\n')]
+          with open('AnyKernel3/anykernel.sh', 'w') as f:
+              f.write('\n'.join(lines))
+          print('anykernel.sh written')
+          PYEOF
+          cd AnyKernel3
+          zip -r9 ../ReSukiSU_v4.1.0_KPM_LTO_none_mondrian_vendor.zip . -x '.git*'
+          ls -lh ../ReSukiSU_v4.1.0_KPM_LTO_none_mondrian_vendor.zip
+
+      - name: Upload AnyKernel3 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReSukiSU-v4.1.0-KPM-Mondrian-Vendor
+          path: ReSukiSU_v4.1.0_KPM_LTO_none_mondrian_vendor.zip
+          retention-days: 14
+
+      - name: Upload raw Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mondrian-Vendor-GKI-Image
+          path: kernel_source/out/arch/arm64/boot/Image
+          retention-days: 7
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 3
