@@ -29,15 +29,24 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      - name: Checkout ReSukiSU v4.1.0 (full history for version counting)
+      - name: Checkout ReSukiSU v4.1.0 from upstream (has miuix branch)
         uses: actions/checkout@v4
         with:
+          repository: ReSukiSU/ReSukiSU
           ref: v4.1.0
           path: ReSukiSU
           fetch-depth: 0
 
       - name: Fix git safe.directory
         run: git config --global --add safe.directory '*'
+
+      - name: Verify KERNEL_SU_VERSION can be computed
+        run: |
+          cd ReSukiSU/kernel
+          git branch -a | grep miuix || echo "WARNING: no miuix branch"
+          VER=$(git rev-list --count HEAD ^miuix 2>/dev/null || git rev-list --count HEAD)
+          echo "KERNEL_SU_VERSION=$VER"
+          [ -n "$VER" ] && [ "$VER" != "0" ] && echo "OK" || echo "WARN: version is 0 or empty"
 
       - name: Setup repo tool
         run: |
