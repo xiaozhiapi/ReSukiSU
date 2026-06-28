@@ -119,15 +119,44 @@ jobs:
       - name: Patch Xiaomi source bugs
         run: |
           cd kernel_source
-          # ufshcd.c: ufshcd.h(1411-1413) 把 3 个 WriteBooster 函数声明为 non-static，
-          # 但 .c 里是 static/static inline → 冲突。统一把这 3 个在 .c 里改成 non-static。
+          # ── 1. ufshcd.c: 3 个 WriteBooster 函数 static↔non-static 冲突 → 统一改 non-static
           if [ -f drivers/scsi/ufs/ufshcd.c ]; then
             sed -i -E 's/^static (inline )?(void|int) (ufshcd_wb_ctrl|ufshcd_wb_toggle_flush_during_h8|ufshcd_wb_toggle_flush)\(/\2 \3(/' \
               drivers/scsi/ufs/ufshcd.c
-            echo "Patched ufshcd.c (wb funcs):"
-            grep -nE '(void|int) (ufshcd_wb_ctrl|ufshcd_wb_toggle_flush_during_h8|ufshcd_wb_toggle_flush)\(' \
-              drivers/scsi/ufs/ufshcd.c | head -10
+            echo "Patched ufshcd.c wb funcs"
           fi
+          # ── 2. 通用去重: 删除文件内重复定义的函数（小米补丁打重导致）
+          python3 << 'PYEOF'
+          import re
+          # (文件, [重复函数名])
+          dups = [
+              ('drivers/usb/gadget/udc/core.c',
+               ['usb_gadget_enable_async_callbacks', 'usb_gadget_disable_async_callbacks']),
+          ]
+          for path, names in dups:
+              try:
+                  with open(path) as f:
+                      lines = f.readlines()
+              except FileNotFoundError:
+                  continue
+              for name in names:
+                  sig = re.compile(r'^\s*static\s+inline\s+\w+\s+' + re.escape(name) + r'\s*\(')
+                  starts = [i for i, l in enumerate(lines) if sig.match(l)]
+                  # 保留第一处，删除其后所有重复（从后往前删保持索引有效）
+                  for s in reversed(starts[1:]):
+                      depth = 0; seen = False; end = s
+                      for j in range(s, len(lines)):
+                          depth += lines[j].count('{') - lines[j].count('}')
+                          if '{' in lines[j]:
+                              seen = True
+                          if seen and depth == 0:
+                              end = j; break
+                      del lines[s:end+1]
+                      print(f'  removed dup {name} at line {s+1} in {path}')
+              with open(path, 'w') as f:
+                  f.writelines(lines)
+          print('Dedup done')
+          PYEOF
           echo "Source patches done"
 
       - name: Configure kernel (gki_defconfig + KSU/KPM, 不加载私有驱动)
