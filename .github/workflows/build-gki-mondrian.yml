@@ -29,7 +29,7 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      - name: Checkout ReSukiSU v4.1.0 from upstream (has miuix branch)
+      - name: Checkout ReSukiSU v4.1.0
         uses: actions/checkout@v4
         with:
           repository: ReSukiSU/ReSukiSU
@@ -37,16 +37,20 @@ jobs:
           path: ReSukiSU
           fetch-depth: 0
 
-      - name: Fix git safe.directory
-        run: git config --global --add safe.directory '*'
-
-      - name: Verify KERNEL_SU_VERSION can be computed
+      - name: Fix git safe.directory + hardcode KERNELSU_VERSION
         run: |
-          cd ReSukiSU/kernel
-          git branch -a | grep miuix || echo "WARNING: no miuix branch"
-          VER=$(git rev-list --count HEAD ^miuix 2>/dev/null || git rev-list --count HEAD)
-          echo "KERNEL_SU_VERSION=$VER"
-          [ -n "$VER" ] && [ "$VER" != "0" ] && echo "OK" || echo "WARN: version is 0 or empty"
+          git config --global --add safe.directory '*'
+          # miuix 分支在所有 repo 里都不存在，直接 patch Makefile
+          # 在 kernel/Makefile 的 ifndef 块之前先设置好版本号
+          KMKFILE="$GITHUB_WORKSPACE/ReSukiSU/kernel/Makefile"
+          if [ -f "$KMKFILE" ]; then
+            # 在文件最前面插入 KERNELSU_VERSION := 34993
+            sed -i '1s/^/KERNELSU_VERSION := 34993\n/' "$KMKFILE"
+            head -5 "$KMKFILE"
+          else
+            echo "Makefile not found at $KMKFILE"
+            find $GITHUB_WORKSPACE/ReSukiSU -name "Makefile" | head -5
+          fi
 
       - name: Setup repo tool
         run: |
@@ -95,6 +99,7 @@ jobs:
           export OUT_DIR=$GITHUB_WORKSPACE/out
           export BUILD_CONFIG=common/build.config.gki.aarch64
           export LTO=thin
+          export KERNELSU_VERSION=34993
           export CONFIG_KSU=y
           export CONFIG_KSU_MANUAL_SU=y
           export CONFIG_KPM=y
