@@ -29,11 +29,15 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      - name: Checkout ReSukiSU v4.1.0
+      - name: Checkout ReSukiSU v4.1.0 (full history for version counting)
         uses: actions/checkout@v4
         with:
           ref: v4.1.0
           path: ReSukiSU
+          fetch-depth: 0
+
+      - name: Fix git safe.directory
+        run: git config --global --add safe.directory '*'
 
       - name: Setup repo tool
         run: |
@@ -41,9 +45,6 @@ jobs:
           curl -fsSLo ~/.bin/repo https://storage.googleapis.com/git-repo-downloads/repo
           chmod +x ~/.bin/repo
           echo "$HOME/.bin" >> $GITHUB_PATH
-
-      - name: Fix git safe.directory (prevent KERNEL_SU_VERSION empty)
-        run: git config --global --add safe.directory '*'
 
       - name: Sync android12-5.10 kernel via repo
         run: |
@@ -55,7 +56,6 @@ jobs:
             --repo-rev=stable \
             --no-clone-bundle
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
-          ls
           head -5 common/Makefile
           ls build/build.sh && echo "build.sh OK"
 
@@ -96,8 +96,7 @@ jobs:
           echo "=== Build done ==="
 
       - name: Check output
-        run: |
-          ls -lh $GITHUB_WORKSPACE/out/dist/ || echo "no dist/"
+        run: ls -lh $GITHUB_WORKSPACE/out/dist/ || echo "no dist"
 
       - name: Package AnyKernel3
         run: |
@@ -131,6 +130,15 @@ jobs:
           name: ReSukiSU-v4.1.0-KPM-GKI-android12-5.10-builtin-mondrian
           path: ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip
           retention-days: 14
+
+      - name: Upload raw Image
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GKI-Image-android12-5.10-KPM
+          path: out/dist/Image
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Upload build log on failure
         if: failure()
