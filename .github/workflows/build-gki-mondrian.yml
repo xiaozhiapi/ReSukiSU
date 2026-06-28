@@ -35,22 +35,30 @@ jobs:
           ref: v4.1.0
           path: ReSukiSU
 
-      - name: Clone android12-5.10 kernel source (direct git)
+      - name: Clone kernel sources (standard layout)
         run: |
+          set -euo pipefail
           df -h $GITHUB_WORKSPACE
-          echo "Cloning kernel/common android12-5.10..."
+
+          # 标准 repo 布局：
+          # $GITHUB_WORKSPACE/
+          # ├── common/       (kernel/common)
+          # ├── build/        (kernel/build)
+          # └── prebuilts/    (toolchains)
+
+          echo "==> Clone kernel/common (android12-5.10)"
           git clone --depth=1 \
             https://android.googlesource.com/kernel/common \
-            -b android12-5.10 \
-            kernel/common
-          head -5 kernel/common/Makefile
+            -b android12-5.10 common
+          head -5 common/Makefile
 
-          echo "Cloning build tools..."
+          echo "==> Clone kernel/build (android12-5.10)"
           git clone --depth=1 \
             https://android.googlesource.com/kernel/build \
-            kernel/build
+            -b android12-5.10 build
+          ls build/build.sh
 
-          echo "Cloning prebuilt clang..."
+          echo "==> Clone prebuilt clang"
           git clone --depth=1 \
             https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
             -b android12-5.10 \
@@ -59,12 +67,12 @@ jobs:
             https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
             prebuilts/clang/host/linux-x86
 
-          echo "Cloning prebuilt gcc aarch64..."
+          echo "==> Clone prebuilt gcc aarch64"
           git clone --depth=1 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
             prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
 
-          echo "Cloning build-tools..."
+          echo "==> Clone build-tools"
           git clone --depth=1 \
             https://android.googlesource.com/platform/prebuilts/build-tools \
             prebuilts/build-tools
@@ -73,26 +81,29 @@ jobs:
 
       - name: Integrate ReSukiSU + KPM into kernel
         run: |
-          ln -sf $GITHUB_WORKSPACE/ReSukiSU/kernel kernel/common/drivers/kernelsu
-          grep -q kernelsu kernel/common/drivers/Makefile || \
-            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> kernel/common/drivers/Makefile
-          grep -q kernelsu kernel/common/drivers/Kconfig || \
-            sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' kernel/common/drivers/Kconfig
-          SYMLIST=kernel/common/android/abi_gki_aarch64_core
+          set -euo pipefail
+          ln -sf $GITHUB_WORKSPACE/ReSukiSU/kernel common/drivers/kernelsu
+          grep -q kernelsu common/drivers/Makefile || \
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> common/drivers/Makefile
+          grep -q kernelsu common/drivers/Kconfig || \
+            sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' common/drivers/Kconfig
+          SYMLIST=common/android/abi_gki_aarch64_core
           if [ -f "$SYMLIST" ]; then
             for sym in ksu_handle_faccessat ksu_handle_stat ksu_handle_execveat \
                        ksu_handle_newfstatat kallsyms_lookup_name; do
               grep -qxF "$sym" "$SYMLIST" || echo "$sym" >> "$SYMLIST"
             done
           fi
-          grep kernelsu kernel/common/drivers/Makefile
+          grep kernelsu common/drivers/Makefile
+          echo "Integration OK"
 
       - name: Build GKI kernel
         run: |
+          set -euo pipefail
           export ROOT_DIR=$GITHUB_WORKSPACE
-          export KERNEL_DIR=kernel/common
+          export KERNEL_DIR=common
           export OUT_DIR=$GITHUB_WORKSPACE/out
-          export BUILD_CONFIG=kernel/common/build.config.gki.aarch64
+          export BUILD_CONFIG=common/build.config.gki.aarch64
           export LTO=thin
           export CONFIG_KSU=y
           export CONFIG_KSU_MANUAL_SU=y
@@ -100,17 +111,20 @@ jobs:
           export CONFIG_KALLSYMS=y
           export CONFIG_KALLSYMS_ALL=y
           export CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
-          cd $GITHUB_WORKSPACE
-          kernel/build/build.sh 2>&1 | tee build.log | tail -40
+          build/build.sh 2>&1 | tee build.log
+          echo "=== Build complete ==="
 
       - name: Check build output
         run: |
-          ls -lh out/dist/ 2>/dev/null || { ls -lh out/ 2>/dev/null && echo "no dist/"; } || echo "no out/"
-          [ -f out/dist/Image ] && echo "Image: $(du -sh out/dist/Image | cut -f1)" || true
+          echo "=== out/dist/ ==="
+          ls -lh out/dist/ 2>/dev/null || echo "no dist/"
+          ls -lh out/ 2>/dev/null || echo "no out/"
+          [ -f out/dist/Image ] && echo "Image: $(du -sh out/dist/Image)" || true
+          [ -f out/dist/boot.img ] && echo "boot.img: $(du -sh out/dist/boot.img)" || true
 
       - name: Package AnyKernel3
-        if: success()
         run: |
+          set -euo pipefail
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
           cat > AnyKernel3/anykernel.sh << 'AKEOF'
           properties() { '
@@ -128,19 +142,28 @@ jobs:
           split_boot;
           flash_boot;
           AKEOF
-          [ -f out/dist/Image ] && cp out/dist/Image AnyKernel3/Image
-          [ -f out/dist/Image.lz4 ] && cp out/dist/Image.lz4 AnyKernel3/Image.lz4
+          [ -f out/dist/Image ] && cp out/dist/Image AnyKernel3/Image && echo "Copied Image"
+          [ -f out/dist/Image.lz4 ] && cp out/dist/Image.lz4 AnyKernel3/Image.lz4 && echo "Copied Image.lz4"
+          ls -la AnyKernel3/Image* 2>/dev/null || echo "WARNING: no Image in AnyKernel3!"
           cd AnyKernel3
           zip -r9 $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip . -x '.git*'
           ls -lh $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip
 
-      - name: Upload AnyKernel3
-        if: success()
+      - name: Upload AnyKernel3 zip
         uses: actions/upload-artifact@v4
         with:
           name: ReSukiSU-v4.1.0-KPM-GKI-android12-5.10-builtin-mondrian
           path: ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip
           retention-days: 14
+
+      - name: Upload raw Image
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GKI-Image-android12-5.10-KPM
+          path: out/dist/Image
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Upload build log on failure
         if: failure()
