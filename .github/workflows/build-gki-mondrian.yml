@@ -1,16 +1,11 @@
-name: Build GKI android12-5.10 ReSukiSU Built-in
+name: Build GKI android12-5.10 ReSukiSU Built-in + KPM
 
 on:
   workflow_dispatch:
-    inputs:
-      debug:
-        description: 'Enable debug'
-        required: false
-        default: 'false'
 
 jobs:
   build:
-    name: Build GKI android12-5.10 (sublevel 236)
+    name: Build GKI android12-5.10 (ReSukiSU + KPM)
     runs-on: ubuntu-22.04
     timeout-minutes: 120
 
@@ -37,7 +32,7 @@ jobs:
           sudo apt-get install -y -qq \
             git python3 python3-pip bc flex bison \
             libssl-dev libelf-dev zip unzip rsync cpio \
-            binutils build-essential gcc make file curl
+            binutils build-essential gcc make file curl wget
 
       - name: Setup repo tool
         run: |
@@ -54,12 +49,12 @@ jobs:
             -b common-android12-5.10-2025-05 \
             --repo-rev=stable --no-clone-bundle 2>&1 | tail -3
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle 2>&1 | tail -10
-          echo "Kernel source synced"
           ls common/
 
-      - name: Integrate ReSukiSU into kernel
+      - name: Integrate ReSukiSU + KPM into kernel
         run: |
           cd kernel_src
+
           # Symlink ReSukiSU kernel driver
           ln -sf $GITHUB_WORKSPACE/ReSukiSU/kernel common/drivers/kernelsu
 
@@ -71,35 +66,38 @@ jobs:
           grep -q kernelsu common/drivers/Kconfig || \
             sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' common/drivers/Kconfig
 
-          # Add KSU symbols to ABI list
+          # Add KSU + KPM symbols to ABI list
           SYMLIST=common/android/abi_gki_aarch64_core
           if [ -f "$SYMLIST" ]; then
-            for sym in ksu_handle_faccessat ksu_handle_stat ksu_handle_execveat ksu_handle_newfstatat; do
+            for sym in ksu_handle_faccessat ksu_handle_stat ksu_handle_execveat \
+                       ksu_handle_newfstatat kallsyms_lookup_name; do
               grep -qxF "$sym" "$SYMLIST" || echo "$sym" >> "$SYMLIST"
             done
-            echo "KSU symbols added to ABI list"
           fi
 
-          echo "ReSukiSU integration complete"
+          echo "Integration complete"
           grep kernelsu common/drivers/Makefile
-          grep kernelsu common/drivers/Kconfig
 
-      - name: Build GKI kernel (LTO=thin, built-in KSU)
+      - name: Build GKI kernel (ReSukiSU + KPM built-in)
         run: |
           cd kernel_src
           export LTO=thin
           export CONFIG_KSU=y
           export CONFIG_KSU_MANUAL_SU=y
+          export CONFIG_KPM=y
+          export CONFIG_KALLSYMS=y
+          export CONFIG_KALLSYMS_ALL=y
+          export CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
           export OUT_DIR=$GITHUB_WORKSPACE/out
-          BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh 2>&1 | tee $GITHUB_WORKSPACE/build.log | tail -50
+          BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh 2>&1 | tee $GITHUB_WORKSPACE/build.log | tail -30
 
-      - name: Check build output
+      - name: Verify build
         run: |
-          echo "=== Build output ==="
-          ls -lh out/dist/ 2>/dev/null || ls -lh out/ 2>/dev/null || echo "No dist dir"
-          # Verify KSU symbols in kernel
+          ls -lh out/dist/ 2>/dev/null || ls -lh out/ 2>/dev/null
           if [ -f out/dist/Image ]; then
-            strings out/dist/Image | grep -c "kernelsu\|ksu" && echo "KSU symbols found in Image" || echo "WARNING: No KSU symbols"
+            echo "Image size: $(du -sh out/dist/Image | cut -f1)"
+            strings out/dist/Image | grep -c "kernelsu\|ksu\|kpm" || true
+            echo "KSU/KPM strings check done"
           fi
 
       - name: Package AnyKernel3
@@ -107,12 +105,10 @@ jobs:
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
 
           cat > AnyKernel3/anykernel.sh << 'AKEOF'
-          # AnyKernel3
           properties() { '
-          kernel.string=ReSukiSU v4.1.0 GKI Built-in - Redmi K60 (mondrian)
+          kernel.string=ReSukiSU v4.1.0 + KPM GKI Built-in - mondrian android12-5.10
           do.devicecheck=0
           do.modules=0
-          do.systemless=0
           do.cleanup=1
           do.cleanuponabort=0
           '; }
@@ -125,25 +121,21 @@ jobs:
           flash_boot;
           AKEOF
 
-          # Copy kernel images
           [ -f out/dist/Image ] && cp out/dist/Image AnyKernel3/Image
           [ -f out/dist/Image.lz4 ] && cp out/dist/Image.lz4 AnyKernel3/Image.lz4
 
-          ls -lh AnyKernel3/Image* 2>/dev/null
-
           cd AnyKernel3
-          zip -r9 $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_GKI_android12-5.10_builtin_mondrian.zip . -x '.git*' '*.md'
-          echo "AnyKernel3 zip created"
-          ls -lh $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_GKI_android12-5.10_builtin_mondrian.zip
+          zip -r9 $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip . -x '.git*'
+          ls -lh $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip
 
-      - name: Upload AnyKernel3 zip
+      - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
         with:
-          name: ReSukiSU-v4.1.0-GKI-android12-5.10-builtin-mondrian
-          path: ReSukiSU_v4.1.0_GKI_android12-5.10_builtin_mondrian.zip
+          name: ReSukiSU-v4.1.0-KPM-GKI-android12-5.10-builtin-mondrian
+          path: ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip
           retention-days: 14
 
-      - name: Upload build log (on failure)
+      - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
