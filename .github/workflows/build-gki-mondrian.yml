@@ -41,32 +41,41 @@ jobs:
           chmod +x ~/.bin/repo
           echo "$HOME/.bin" >> $GITHUB_PATH
 
-      - name: Sync android12-5.10 kernel source (sublevel 236)
+      - name: Sync android12-5.10 kernel source
         run: |
           mkdir kernel_src && cd kernel_src
-          repo init --depth=1 \
-            -u https://android.googlesource.com/kernel/manifest \
-            -b common-android12-5.10-2025-05 \
-            --repo-rev=stable --no-clone-bundle 2>&1 | tail -3
-          repo sync -c -j$(nproc) --no-tags --no-clone-bundle 2>&1 | tail -10
-          ls common/
+          # 尝试多个分支名，直到成功
+          for BRANCH in \
+            "common-android12-5.10-2025-01" \
+            "common-android12-5.10-2024-11" \
+            "common-android12-5.10-2024-09" \
+            "common-android12-5.10"; do
+            echo "==> Trying branch: $BRANCH"
+            repo init --depth=1 \
+              -u https://android.googlesource.com/kernel/manifest \
+              -b "$BRANCH" \
+              --repo-rev=stable --no-clone-bundle 2>&1 | tail -2
+            if repo sync -c -j$(nproc) --no-tags --no-clone-bundle --fail-fast 2>&1 | tee /tmp/sync.log; then
+              echo "SUCCESS with branch: $BRANCH"
+              echo "KERNEL_BRANCH=$BRANCH" >> $GITHUB_ENV
+              break
+            else
+              echo "FAILED with $BRANCH, trying next..."
+              grep -E "error:|fatal:" /tmp/sync.log | head -5 || true
+            fi
+          done
+          ls common/ || (echo "All branches failed!" && exit 1)
+          # 获取内核版本
+          cat common/Makefile | head -5
 
       - name: Integrate ReSukiSU + KPM into kernel
         run: |
           cd kernel_src
-
-          # Symlink ReSukiSU kernel driver
           ln -sf $GITHUB_WORKSPACE/ReSukiSU/kernel common/drivers/kernelsu
-
-          # Add to Makefile
           grep -q kernelsu common/drivers/Makefile || \
             echo 'obj-$(CONFIG_KSU) += kernelsu/' >> common/drivers/Makefile
-
-          # Add to Kconfig
           grep -q kernelsu common/drivers/Kconfig || \
             sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' common/drivers/Kconfig
-
-          # Add KSU + KPM symbols to ABI list
           SYMLIST=common/android/abi_gki_aarch64_core
           if [ -f "$SYMLIST" ]; then
             for sym in ksu_handle_faccessat ksu_handle_stat ksu_handle_execveat \
@@ -74,8 +83,6 @@ jobs:
               grep -qxF "$sym" "$SYMLIST" || echo "$sym" >> "$SYMLIST"
             done
           fi
-
-          echo "Integration complete"
           grep kernelsu common/drivers/Makefile
 
       - name: Build GKI kernel (ReSukiSU + KPM built-in)
@@ -91,19 +98,14 @@ jobs:
           export OUT_DIR=$GITHUB_WORKSPACE/out
           BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh 2>&1 | tee $GITHUB_WORKSPACE/build.log | tail -30
 
-      - name: Verify build
+      - name: Verify build output
         run: |
           ls -lh out/dist/ 2>/dev/null || ls -lh out/ 2>/dev/null
-          if [ -f out/dist/Image ]; then
-            echo "Image size: $(du -sh out/dist/Image | cut -f1)"
-            strings out/dist/Image | grep -c "kernelsu\|ksu\|kpm" || true
-            echo "KSU/KPM strings check done"
-          fi
+          [ -f out/dist/Image ] && echo "Image: $(du -sh out/dist/Image | cut -f1)"
 
       - name: Package AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
-
           cat > AnyKernel3/anykernel.sh << 'AKEOF'
           properties() { '
           kernel.string=ReSukiSU v4.1.0 + KPM GKI Built-in - mondrian android12-5.10
@@ -120,10 +122,8 @@ jobs:
           split_boot;
           flash_boot;
           AKEOF
-
           [ -f out/dist/Image ] && cp out/dist/Image AnyKernel3/Image
           [ -f out/dist/Image.lz4 ] && cp out/dist/Image.lz4 AnyKernel3/Image.lz4
-
           cd AnyKernel3
           zip -r9 $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip . -x '.git*'
           ls -lh $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip
