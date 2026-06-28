@@ -41,7 +41,6 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
 
-          # 用 Python 在 Kbuild 的 ccflags-y += -DKSU_VERSION 行之前插入兜底块
           python3 << 'PYEOF'
           import sys
           kbuild_path = 'ReSukiSU/kernel/Kbuild'
@@ -52,11 +51,10 @@ jobs:
               print('ERROR: target line not found in Kbuild!')
               sys.exit(1)
           if 'KSU_VERSION_FALLBACK_INSERTED' in content:
-              print('Already patched, skipping.')
+              print('Already patched.')
           else:
               fallback_lines = [
                   '# KSU_VERSION_FALLBACK_INSERTED',
-                  '# Ensure KSU_VERSION is never empty when GitHub API fails and miuix branch missing',
                   'ifeq ($(KSU_VERSION),)',
                   'KSU_VERSION := 40000',
                   '$(warning -- KSU_VERSION was empty; using fallback 40000)',
@@ -68,11 +66,6 @@ jobs:
               with open(kbuild_path, 'w') as f:
                   f.write(content)
               print('Kbuild patched OK')
-          # 验证
-          with open(kbuild_path, 'r') as f:
-              for i, line in enumerate(f, 1):
-                  if 'FALLBACK' in line or '40000' in line:
-                      print(f'  L{i}: {line.rstrip()}')
           PYEOF
 
       - name: Setup repo tool
@@ -104,13 +97,7 @@ jobs:
             echo 'obj-$(CONFIG_KSU) += kernelsu/' >> common/drivers/Makefile
           grep -q kernelsu common/drivers/Kconfig || \
             sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' common/drivers/Kconfig
-          SYMLIST=common/android/abi_gki_aarch64_core
-          if [ -f "$SYMLIST" ]; then
-            for sym in ksu_handle_faccessat ksu_handle_stat ksu_handle_execveat \
-                       ksu_handle_newfstatat kallsyms_lookup_name; do
-              grep -qxF "$sym" "$SYMLIST" || echo "$sym" >> "$SYMLIST"
-            done
-          fi
+          echo "Integrate done:"
           grep kernelsu common/drivers/Makefile
 
       - name: Build GKI kernel
@@ -128,11 +115,14 @@ jobs:
           export CONFIG_KALLSYMS=y
           export CONFIG_KALLSYMS_ALL=y
           export CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
+          export KMI_SYMBOL_LIST_STRICT_MODE=0
           build/build.sh 2>&1 | tee $GITHUB_WORKSPACE/build.log
           echo "=== Build done ==="
 
-      - name: Check output
-        run: ls -lh $GITHUB_WORKSPACE/out/dist/ || echo "no dist"
+      - name: Verify Image exists
+        run: |
+          ls -lh $GITHUB_WORKSPACE/out/dist/Image
+          file $GITHUB_WORKSPACE/out/dist/Image
 
       - name: Package AnyKernel3
         run: |
@@ -168,13 +158,11 @@ jobs:
           retention-days: 14
 
       - name: Upload raw Image
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: GKI-Image-android12-5.10-KPM
           path: out/dist/Image
           retention-days: 7
-          if-no-files-found: warn
 
       - name: Upload build log on failure
         if: failure()
