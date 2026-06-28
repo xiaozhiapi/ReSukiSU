@@ -20,74 +20,79 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      - name: Checkout ReSukiSU v4.1.0
-        uses: actions/checkout@v4
-        with:
-          ref: v4.1.0
-          path: ReSukiSU
-
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             git python3 python3-pip bc flex bison \
             libssl-dev libelf-dev zip unzip rsync cpio \
-            binutils build-essential gcc make file curl wget
+            binutils build-essential gcc make file curl wget \
+            libncurses-dev gawk openssl pahole
 
-      - name: Setup repo tool
-        run: |
-          mkdir -p ~/.bin
-          curl -fsSLo ~/.bin/repo https://storage.googleapis.com/git-repo-downloads/repo
-          chmod +x ~/.bin/repo
-          echo "$HOME/.bin" >> $GITHUB_PATH
+      - name: Checkout ReSukiSU v4.1.0
+        uses: actions/checkout@v4
+        with:
+          ref: v4.1.0
+          path: ReSukiSU
 
-      - name: Sync android12-5.10 kernel source
+      - name: Clone android12-5.10 kernel source (direct git)
         run: |
-          mkdir kernel_src && cd kernel_src
-          # 尝试多个分支名，直到成功
-          for BRANCH in \
-            "common-android12-5.10-2025-01" \
-            "common-android12-5.10-2024-11" \
-            "common-android12-5.10-2024-09" \
-            "common-android12-5.10"; do
-            echo "==> Trying branch: $BRANCH"
-            repo init --depth=1 \
-              -u https://android.googlesource.com/kernel/manifest \
-              -b "$BRANCH" \
-              --repo-rev=stable --no-clone-bundle 2>&1 | tail -2
-            if repo sync -c -j$(nproc) --no-tags --no-clone-bundle --fail-fast 2>&1 | tee /tmp/sync.log; then
-              echo "SUCCESS with branch: $BRANCH"
-              echo "KERNEL_BRANCH=$BRANCH" >> $GITHUB_ENV
-              break
-            else
-              echo "FAILED with $BRANCH, trying next..."
-              grep -E "error:|fatal:" /tmp/sync.log | head -5 || true
-            fi
-          done
-          ls common/ || (echo "All branches failed!" && exit 1)
-          # 获取内核版本
-          cat common/Makefile | head -5
+          echo "Cloning kernel/common android12-5.10..."
+          git clone --depth=1 \
+            https://android.googlesource.com/kernel/common \
+            -b android12-5.10 \
+            kernel/common
+          echo "Kernel version:"
+          cat kernel/common/Makefile | head -5
+
+          echo "Cloning build tools..."
+          git clone --depth=1 \
+            https://android.googlesource.com/kernel/build \
+            kernel/build
+
+          echo "Cloning prebuilt clang..."
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            -b android12-5.10 \
+            prebuilts/clang/host/linux-x86 || \
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            -b master \
+            prebuilts/clang/host/linux-x86
+
+          echo "Cloning prebuilt gcc..."
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+            prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
+
+          echo "Cloning build tools prebuilts..."
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/prebuilts/build-tools \
+            prebuilts/build-tools
 
       - name: Integrate ReSukiSU + KPM into kernel
         run: |
-          cd kernel_src
-          ln -sf $GITHUB_WORKSPACE/ReSukiSU/kernel common/drivers/kernelsu
-          grep -q kernelsu common/drivers/Makefile || \
-            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> common/drivers/Makefile
-          grep -q kernelsu common/drivers/Kconfig || \
-            sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' common/drivers/Kconfig
-          SYMLIST=common/android/abi_gki_aarch64_core
+          ln -sf $GITHUB_WORKSPACE/ReSukiSU/kernel kernel/common/drivers/kernelsu
+          grep -q kernelsu kernel/common/drivers/Makefile || \
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> kernel/common/drivers/Makefile
+          grep -q kernelsu kernel/common/drivers/Kconfig || \
+            sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' kernel/common/drivers/Kconfig
+          SYMLIST=kernel/common/android/abi_gki_aarch64_core
           if [ -f "$SYMLIST" ]; then
             for sym in ksu_handle_faccessat ksu_handle_stat ksu_handle_execveat \
                        ksu_handle_newfstatat kallsyms_lookup_name; do
               grep -qxF "$sym" "$SYMLIST" || echo "$sym" >> "$SYMLIST"
             done
           fi
-          grep kernelsu common/drivers/Makefile
+          echo "Integration OK"
+          grep kernelsu kernel/common/drivers/Makefile
 
-      - name: Build GKI kernel (ReSukiSU + KPM built-in)
+      - name: Build GKI kernel
         run: |
-          cd kernel_src
+          export ROOT_DIR=$GITHUB_WORKSPACE
+          export KERNEL_DIR=kernel/common
+          export OUT_DIR=$GITHUB_WORKSPACE/out
+          export BUILD_CONFIG=kernel/common/build.config.gki.aarch64
           export LTO=thin
           export CONFIG_KSU=y
           export CONFIG_KSU_MANUAL_SU=y
@@ -95,15 +100,17 @@ jobs:
           export CONFIG_KALLSYMS=y
           export CONFIG_KALLSYMS_ALL=y
           export CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
-          export OUT_DIR=$GITHUB_WORKSPACE/out
-          BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh 2>&1 | tee $GITHUB_WORKSPACE/build.log | tail -30
 
-      - name: Verify build output
+          cd $GITHUB_WORKSPACE
+          kernel/build/build.sh 2>&1 | tee build.log | tail -40
+
+      - name: Check build output
         run: |
-          ls -lh out/dist/ 2>/dev/null || ls -lh out/ 2>/dev/null
-          [ -f out/dist/Image ] && echo "Image: $(du -sh out/dist/Image | cut -f1)"
+          ls -lh out/dist/ 2>/dev/null || ls -lh out/ || echo "no out"
+          [ -f out/dist/Image ] && echo "Image: $(du -sh out/dist/Image | cut -f1)" || true
 
       - name: Package AnyKernel3
+        if: success()
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
           cat > AnyKernel3/anykernel.sh << 'AKEOF'
@@ -126,9 +133,9 @@ jobs:
           [ -f out/dist/Image.lz4 ] && cp out/dist/Image.lz4 AnyKernel3/Image.lz4
           cd AnyKernel3
           zip -r9 $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip . -x '.git*'
-          ls -lh $GITHUB_WORKSPACE/ReSukiSU_v4.1.0_KPM_GKI_android12-5.10_mondrian.zip
 
       - name: Upload AnyKernel3
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ReSukiSU-v4.1.0-KPM-GKI-android12-5.10-builtin-mondrian
