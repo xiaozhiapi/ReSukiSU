@@ -119,10 +119,14 @@ jobs:
       - name: Patch Xiaomi source bugs
         run: |
           cd kernel_source
-          # ufshcd.c: static 声明与头文件 non-static 声明冲突 → 统一改为 non-static
+          # ufshcd.c: ufshcd.h(1411-1413) 把 3 个 WriteBooster 函数声明为 non-static，
+          # 但 .c 里是 static/static inline → 冲突。统一把这 3 个在 .c 里改成 non-static。
           if [ -f drivers/scsi/ufs/ufshcd.c ]; then
-            sed -i 's/^static int ufshcd_wb_ctrl(/int ufshcd_wb_ctrl(/g' drivers/scsi/ufs/ufshcd.c
-            echo "Patched ufshcd.c"
+            sed -i -E 's/^static (inline )?(void|int) (ufshcd_wb_ctrl|ufshcd_wb_toggle_flush_during_h8|ufshcd_wb_toggle_flush)\(/\2 \3(/' \
+              drivers/scsi/ufs/ufshcd.c
+            echo "Patched ufshcd.c (wb funcs):"
+            grep -nE '(void|int) (ufshcd_wb_ctrl|ufshcd_wb_toggle_flush_during_h8|ufshcd_wb_toggle_flush)\(' \
+              drivers/scsi/ufs/ufshcd.c | head -10
           fi
           echo "Source patches done"
 
