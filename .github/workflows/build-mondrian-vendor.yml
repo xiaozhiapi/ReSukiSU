@@ -90,18 +90,31 @@ jobs:
             sed -i '/^endmenu$/i source "drivers/kernelsu/Kconfig"' kernel_source/drivers/Kconfig
           echo "Integration check: $(grep kernelsu kernel_source/drivers/Makefile)"
 
-      - name: Fix missing Xiaomi proprietary Kconfig stubs
+      - name: Fix missing Xiaomi proprietary stubs
         run: |
           cd kernel_source
-          # 扫描所有 Kconfig 文件中引用但不存在的 source 路径，创建空 stub
+          # 为 Kconfig 中引用但不存在的目录创建空 Kconfig + Makefile stub
           grep -r '^source ' --include='Kconfig' -h | sed 's/source "//;s/"//' | sort -u | while read kpath; do
             if [ ! -f "$kpath" ]; then
-              echo "Creating stub: $kpath"
+              echo "Kconfig stub: $kpath"
               mkdir -p "$(dirname $kpath)"
               touch "$kpath"
+              # 同时创建空 Makefile（防止 make 报 No rule to make target）
+              mfpath="$(dirname $kpath)/Makefile"
+              [ ! -f "$mfpath" ] && touch "$mfpath"
             fi
           done
-          echo "Kconfig stubs done"
+          # 同样扫描 Makefile 中 obj-y += xxx/ 但目录缺 Makefile 的情况
+          grep -r 'obj-.*+=.*/' --include='Makefile' -h | grep -oP '[\w/-]+/$' | sort -u | while read subdir; do
+            for base in drivers net arch; do
+              fullpath="$base/$subdir"
+              if [ -d "$fullpath" ] && [ ! -f "$fullpath/Makefile" ]; then
+                echo "Makefile stub: $fullpath/Makefile"
+                touch "$fullpath/Makefile"
+              fi
+            done
+          done
+          echo "All stubs done"
 
       - name: Configure kernel (gki_defconfig + mondrian_GKI + KSU/KPM)
         run: |
@@ -127,7 +140,7 @@ jobs:
               f.write('\n'.join(extra) + '\n')
           print('KSU/KPM configs appended')
           PYEOF
-          make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang O=out olddefconfig
+          yes "" | make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang O=out olddefconfig
           echo "=== Key configs ==="
           grep -E 'CONFIG_KSU|CONFIG_KPM|CONFIG_KALLSYMS_ALL|CONFIG_LTO' out/.config
 
