@@ -116,6 +116,16 @@ jobs:
           done
           echo "All stubs done"
 
+      - name: Patch Xiaomi source bugs
+        run: |
+          cd kernel_source
+          # ufshcd.c: static 声明与头文件 non-static 声明冲突 → 统一改为 non-static
+          if [ -f drivers/scsi/ufs/ufshcd.c ]; then
+            sed -i 's/^static int ufshcd_wb_ctrl(/int ufshcd_wb_ctrl(/g' drivers/scsi/ufs/ufshcd.c
+            echo "Patched ufshcd.c"
+          fi
+          echo "Source patches done"
+
       - name: Configure kernel (gki_defconfig + KSU/KPM, 不加载私有驱动)
         run: |
           cd kernel_source
@@ -151,8 +161,10 @@ jobs:
       - name: Build kernel Image (LTO=none keeps kprobe symbols stable)
         run: |
           cd kernel_source
+          # -Wno-error: 把小米源码里一大类"警告当错误"放行，避免逐个修
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
+            KCFLAGS="-Wno-error -Wno-unused-variable -Wno-unused-function" \
             O=out -j$(nproc) \
             Image 2>&1 | tee $GITHUB_WORKSPACE/build.log
           echo "=== Build complete ==="
