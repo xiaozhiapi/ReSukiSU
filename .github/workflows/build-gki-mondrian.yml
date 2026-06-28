@@ -37,20 +37,43 @@ jobs:
           path: ReSukiSU
           fetch-depth: 0
 
-      - name: Fix git safe.directory + hardcode KERNELSU_VERSION
+      - name: Fix git safe.directory + patch Kbuild KSU_VERSION fallback
         run: |
           git config --global --add safe.directory '*'
-          # miuix 分支在所有 repo 里都不存在，直接 patch Makefile
-          # 在 kernel/Makefile 的 ifndef 块之前先设置好版本号
-          KMKFILE="$GITHUB_WORKSPACE/ReSukiSU/kernel/Makefile"
-          if [ -f "$KMKFILE" ]; then
-            # 在文件最前面插入 KERNELSU_VERSION := 34993
-            sed -i '1s/^/KERNELSU_VERSION := 34993\n/' "$KMKFILE"
-            head -5 "$KMKFILE"
-          else
-            echo "Makefile not found at $KMKFILE"
-            find $GITHUB_WORKSPACE/ReSukiSU -name "Makefile" | head -5
-          fi
+
+          # 用 Python 在 Kbuild 的 ccflags-y += -DKSU_VERSION 行之前插入兜底块
+          python3 << 'PYEOF'
+          import sys
+          kbuild_path = 'ReSukiSU/kernel/Kbuild'
+          with open(kbuild_path, 'r') as f:
+              content = f.read()
+          target = 'ccflags-y += -DKSU_VERSION=$(KSU_VERSION)'
+          if target not in content:
+              print('ERROR: target line not found in Kbuild!')
+              sys.exit(1)
+          if 'KSU_VERSION_FALLBACK_INSERTED' in content:
+              print('Already patched, skipping.')
+          else:
+              fallback_lines = [
+                  '# KSU_VERSION_FALLBACK_INSERTED',
+                  '# Ensure KSU_VERSION is never empty when GitHub API fails and miuix branch missing',
+                  'ifeq ($(KSU_VERSION),)',
+                  'KSU_VERSION := 40000',
+                  '$(warning -- KSU_VERSION was empty; using fallback 40000)',
+                  'endif',
+                  '',
+              ]
+              fallback = '\n'.join(fallback_lines) + '\n'
+              content = content.replace(target, fallback + target)
+              with open(kbuild_path, 'w') as f:
+                  f.write(content)
+              print('Kbuild patched OK')
+          # 验证
+          with open(kbuild_path, 'r') as f:
+              for i, line in enumerate(f, 1):
+                  if 'FALLBACK' in line or '40000' in line:
+                      print(f'  L{i}: {line.rstrip()}')
+          PYEOF
 
       - name: Setup repo tool
         run: |
@@ -99,7 +122,6 @@ jobs:
           export OUT_DIR=$GITHUB_WORKSPACE/out
           export BUILD_CONFIG=common/build.config.gki.aarch64
           export LTO=thin
-          export KERNELSU_VERSION=34993
           export CONFIG_KSU=y
           export CONFIG_KSU_MANUAL_SU=y
           export CONFIG_KPM=y
