@@ -10,17 +10,6 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Maximize disk space
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 4096
-          swap-size-mb: 8192
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
@@ -37,6 +26,17 @@ jobs:
           sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-14 100 2>/dev/null || true
           clang --version
           df -h
+
+      - name: Maximize disk space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 4096
+          swap-size-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
 
       - name: Clone Xiaomi mondrian kernel (mondrian-s-oss)
         run: |
