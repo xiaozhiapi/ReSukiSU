@@ -100,7 +100,7 @@ jobs:
           echo "Integrate done:"
           grep kernelsu common/drivers/Makefile
 
-      - name: Build GKI kernel
+      - name: Build GKI kernel (LTO=none to keep kprobe symbols stable)
         run: |
           set -euo pipefail
           cd src
@@ -108,13 +108,15 @@ jobs:
           export KERNEL_DIR=common
           export OUT_DIR=$GITHUB_WORKSPACE/out
           export BUILD_CONFIG=common/build.config.gki.aarch64
-          export LTO=thin
+          export LTO=none
           export CONFIG_KSU=y
           export CONFIG_KSU_MANUAL_SU=y
           export CONFIG_KPM=y
           export CONFIG_KALLSYMS=y
           export CONFIG_KALLSYMS_ALL=y
           export CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
+          export CONFIG_KPROBES=y
+          export CONFIG_KPROBE_EVENTS=y
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           build/build.sh 2>&1 | tee $GITHUB_WORKSPACE/build.log
           echo "=== Build done ==="
