@@ -42,6 +42,9 @@ jobs:
           chmod +x ~/.bin/repo
           echo "$HOME/.bin" >> $GITHUB_PATH
 
+      - name: Fix git safe.directory (prevent KERNEL_SU_VERSION empty)
+        run: git config --global --add safe.directory '*'
+
       - name: Sync android12-5.10 kernel via repo
         run: |
           set -euo pipefail
@@ -52,10 +55,9 @@ jobs:
             --repo-rev=stable \
             --no-clone-bundle
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
-          echo "=== synced ==="
           ls
           head -5 common/Makefile
-          ls build/build.sh
+          ls build/build.sh && echo "build.sh OK"
 
       - name: Integrate ReSukiSU + KPM into kernel
         run: |
@@ -95,9 +97,7 @@ jobs:
 
       - name: Check output
         run: |
-          echo "=== out/dist/ ==="
           ls -lh $GITHUB_WORKSPACE/out/dist/ || echo "no dist/"
-          ls -lh $GITHUB_WORKSPACE/out/ || echo "no out/"
 
       - name: Package AnyKernel3
         run: |
