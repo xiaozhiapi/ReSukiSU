@@ -116,14 +116,17 @@ jobs:
           done
           echo "All stubs done"
 
-      - name: Configure kernel (gki_defconfig + mondrian_GKI + KSU/KPM)
+      - name: Configure kernel (gki_defconfig + KSU/KPM, 不加载私有驱动)
         run: |
           cd kernel_source
           mkdir -p out
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang O=out gki_defconfig
-          cat arch/arm64/configs/vendor/mondrian_GKI.config >> out/.config
           python3 << 'PYEOF'
           extra = [
+              # Qualcomm SM8450 平台支持（mondrian = waipio 平台）
+              'CONFIG_ARCH_WAIPIO=y',
+              'CONFIG_ARCH_CAPE=y',
+              # KSU + KPM
               'CONFIG_KSU=y',
               'CONFIG_KSU_MANUAL_SU=y',
               'CONFIG_KPM=y',
@@ -132,17 +135,18 @@ jobs:
               'CONFIG_KSU_MULTI_MANAGER_SUPPORT=y',
               'CONFIG_KPROBES=y',
               'CONFIG_KPROBE_EVENTS=y',
+              # 禁用 LTO（保证 kprobe 符号稳定）
               '# CONFIG_LTO_CLANG_THIN is not set',
               '# CONFIG_LTO_CLANG_FULL is not set',
               'CONFIG_LTO_NONE=y',
           ]
           with open('out/.config', 'a') as f:
               f.write('\n'.join(extra) + '\n')
-          print('KSU/KPM configs appended')
+          print('Configs appended')
           PYEOF
           yes "" | make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang O=out olddefconfig
           echo "=== Key configs ==="
-          grep -E 'CONFIG_KSU|CONFIG_KPM|CONFIG_KALLSYMS_ALL|CONFIG_LTO' out/.config
+          grep -E 'CONFIG_KSU|CONFIG_KPM|CONFIG_KALLSYMS_ALL|CONFIG_LTO|CONFIG_ARCH_WAIPIO' out/.config
 
       - name: Build kernel Image (LTO=none keeps kprobe symbols stable)
         run: |
